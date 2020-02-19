@@ -1,0 +1,718 @@
+---
+title: "Convergent evolution of conserved mitochondrial pathways underlies repeated adaptation to extreme environments"
+output:
+  html_document:
+    keep_md: TRUE
+    toc: yes
+    toc_depth: '3'
+  pdf_document:
+    toc: yes
+    toc_depth: '3'
+  html_notebook:
+    fig_caption: yes
+    toc: yes
+    toc_depth: 3
+    toc_float: yes
+---
+
+# 1. Required packages and functions
+```{r message=FALSE}
+library(AICcmodavg)
+library(bbmle)
+library(car)
+library(effects)
+library(ggplot2)
+library(heplots)
+library(labdsv)
+library(lme4)
+library(loop)
+library(MASS)
+library(MuMIn)
+library(nlme)
+library(nplr)
+library(plyr)
+library(pscl)
+library(sjPlot)
+library(stats)
+library(stats4)
+library(vegan)
+source("http://peterhaschke.com/Code/multiplot.R")
+st.err <- function(x) {sd(x)/sqrt(length(x))}
+```
+
+# 2. Analysis of COX activity
+## 2.1. Loading data
+```{r warning=FALSE}
+cox.data <- read.csv("cox_data_final.csv")
+```
+
+## 2.2. Model selection
+```{r warning=FALSE}
+#Defining alternative models
+cox.null <- lmer(RelativeSlope ~ (1|ID), data=cox.data)
+cox.m1 <- lmer(RelativeSlope ~ Habitat + (1|ID), data=cox.data)
+cox.m2 <- lmer(RelativeSlope ~ Drainage + (1|ID), data=cox.data)
+cox.m3 <- lmer(RelativeSlope ~ H2S + (1|ID), data=cox.data)
+cox.m4 <- lmer(RelativeSlope ~ Habitat + Drainage + (1|ID), data=cox.data)
+cox.m5 <- lmer(RelativeSlope ~ Habitat + H2S + (1|ID), data=cox.data)
+cox.m6 <- lmer(RelativeSlope ~ Drainage + H2S + (1|ID), data=cox.data)
+cox.m7 <- lmer(RelativeSlope ~ Habitat * Drainage + (1|ID), data=cox.data)
+cox.m8 <- lmer(RelativeSlope ~ Habitat * H2S + (1|ID), data=cox.data)
+cox.m9 <- lmer(RelativeSlope ~ Drainage * H2S + (1|ID), data=cox.data)
+cox.m10 <- lmer(RelativeSlope ~ Habitat + Drainage + H2S + (1|ID), data=cox.data)
+cox.m11 <- lmer(RelativeSlope ~ Habitat * Drainage * H2S + (1|ID), data=cox.data)
+
+#Comparing alternative models
+AICctab(cox.null,cox.m1,cox.m2,cox.m3,cox.m4,cox.m5,cox.m6,cox.m7,cox.m8,cox.m9,cox.m10,cox.m11, base =T, weights = T)
+```
+Model 8 is the only model with dAICc < 2.
+
+## 2.3. Assessment of best model (cox.m8)
+```{r warning=FALSE}
+summary(cox.m8)
+tab_model(cox.m8, digits = 4, show.df = TRUE)
+```
+
+## 2.4. Data visualization
+```{r warning=FALSE}
+#Calculation of descriptive statistics
+cox.means <- aggregate(x=cox.data$RelativeSlope,
+                   by=list(cox.data$Population, cox.data$H2S),
+                   FUN=mean)
+cox.se <- aggregate(x=cox.data$RelativeSlope,
+                by=list(cox.data$Population, cox.data$H2S),
+                FUN=st.err)
+
+cox.means <- cbind(cox.means, cox.se$x)
+names(cox.means) <- c("Population", "H2S", "Activity", "SE")
+
+cox.means$drainage<-ifelse(cox.means$Population=="Banos","Pich",
+                       ifelse(cox.means$Population=="Rosita","Pich",
+                              ifelse(cox.means$Population=="Bonita","Tac",
+                                     ifelse(cox.means$Population=="PSO","Tac","Puy"
+                                     ))))
+
+cox.means$Habitat<-ifelse(cox.means$Population=="Banos","S",
+                      ifelse(cox.means$Population=="PSO","S",
+                             ifelse(cox.means$Population=="Lluvia","S","NS"
+                             )))
+
+#Visualization
+ggplot(aes(x=H2S, y=Activity, group=Population, color=Habitat, shape=drainage), data=cox.means) + 
+  geom_point(size=4) +  
+  geom_line(size=1) + 
+  theme_classic() +
+  geom_pointrange(aes(ymin=Activity-SE, ymax=Activity+SE), position=position_dodge(0.0005)) +
+  scale_color_manual(values=c('#5DA5DA', '#DECF3F','#5DA5DA','#5DA5DA', '#DECF3F', '#DECF3F')) +
+  geom_hline(yintercept=1, linetype="dashed") + 
+  theme(legend.position = "none")
+```
+
+# 3. Analysis of SQR activity
+## 3.1. Loading data
+```{r}
+sqr.data <- read.csv("SQRactivity.csv")
+```
+
+## 3.2. Model selection
+```{r message=FALSE}
+#Defining alternative models
+sqr.null <- lmer(-Slope ~ (1|ID), data=sqr.data)
+sqr.m1 <- lmer(-Slope ~ Habitat + (1|ID), data=sqr.data)
+sqr.m2 <- lmer(-Slope ~ Drainage + (1|ID), data=sqr.data)
+sqr.m3 <- lmer(-Slope ~ H2S + (1|ID), data=sqr.data)
+sqr.m4 <- lmer(-Slope ~ Habitat + Drainage + (1|ID), data=sqr.data)
+sqr.m5 <- lmer(-Slope ~ Habitat + H2S + (1|ID), data=sqr.data)
+sqr.m6 <- lmer(-Slope ~ Drainage + H2S + (1|ID), data=sqr.data)
+sqr.m7 <- lmer(-Slope ~ Habitat * Drainage + (1|ID), data=sqr.data)
+sqr.m8 <- lmer(-Slope ~ Habitat * H2S + (1|ID), data=sqr.data)
+sqr.m9 <- lmer(-Slope ~ Drainage * H2S + (1|ID), data=sqr.data)
+sqr.m10 <- lmer(-Slope ~ Habitat + Drainage + H2S + (1|ID), data=sqr.data)
+sqr.m11 <- lmer(-Slope ~ Habitat * Drainage * H2S + (1|ID), data=sqr.data)
+
+#Comparing alternative models
+AICctab(sqr.null,sqr.m1,sqr.m2,sqr.m3,sqr.m4,sqr.m5,sqr.m6,sqr.m7,sqr.m8,sqr.m9,sqr.m10,sqr.m11, base =T, weights = T)
+```
+
+Model 8 is the only model with dAICc < 2.
+
+## 3.3. Assessment of best model (sqr.m8)
+```{r warning=FALSE}
+summary(sqr.m8)
+tab_model(sqr.m8, digits = 4, show.df = TRUE)
+```
+
+## 3.4. Data visualization
+```{r warning=FALSE}
+#Calculation of descriptive statistics
+sqr.means <- aggregate(x=sqr.data$Slope,
+                   by=list(sqr.data$Population, sqr.data$H2S),
+                   FUN=mean)
+sqr.se <- aggregate(x=sqr.data$Slope,
+                by=list(sqr.data$Population, sqr.data$H2S),
+                FUN=st.err)
+
+sqr.means <- cbind(sqr.means, sqr.se$x)
+names(sqr.means) <- c("Population", "H2S", "Activity", "SE")
+
+sqr.means$drainage<-ifelse(sqr.means$Population=="Banos","Pich",
+                    ifelse(sqr.means$Population=="Rosita","Pich",
+                           ifelse(sqr.means$Population=="Bonita","Tac",
+                                  ifelse(sqr.means$Population=="PSO","Tac","Puy"
+                                  ))))
+
+sqr.means$Habitat<-ifelse(sqr.means$Population=="Banos","S",
+                       ifelse(sqr.means$Population=="PSO","S",
+                              ifelse(sqr.means$Population=="Lluvia","S","NS"
+                                     )))
+#Visualization
+ggplot(aes(x=H2S, y=-Activity, group=Population, color=Habitat, shape=drainage), data=sqr.means) + 
+  geom_point(size=4) +
+  geom_line(size=1) +
+  theme_classic() +
+  geom_pointrange(aes(ymin=-Activity-SE, ymax=-Activity+SE), position=position_dodge(0.0005)) +
+    scale_color_manual(values=c('#5DA5DA', '#DECF3F','#5DA5DA','#5DA5DA', '#DECF3F', '#DECF3F')) +
+  geom_hline(yintercept=0, linetype="dashed") +
+  ylim(-0.01,0.02) +
+  theme(legend.position = "none")
+```
+
+# 4. Analysis of mitochondrial H2S concentrations in vivo
+## 4.1. Loading data
+```{r warning=FALSE}
+mitoA.data <- read.csv("mitoA_data.csv")
+
+#Designating variables
+id <- as.factor(mitoA.data$ID)
+pop <- as.factor(mitoA.data$Pop)
+habitat <- as.factor(mitoA.data$Habitat)
+drainage <- as.factor(mitoA.data$Drainage)
+tissue <- as.factor(mitoA.data$Tissue)
+bin <- mitoA.data$Bin
+group <-as.factor(mitoA.data$Group)
+H2S <- mitoA.data$H2Szero
+mass <- mitoA.data$Mass
+mito <- mitoA.data$relative.mitoA
+```
+
+## 4.2. Model selection
+```{r warning=FALSE}
+#Defining alternative models
+mitoA.null <- lmer(mito ~ (1|id) + (1|tissue), data=mitoA.data)
+mitoA.m1 <- lmer(mito ~ bin + (1|id) + (1|tissue), data=mitoA.data)
+mitoA.m2 <- lmer(mito ~ habitat + (1|id) + (1|tissue), data=mitoA.data)
+mitoA.m3 <- lmer(mito ~ drainage + (1|id) + (1|tissue), data=mitoA.data)
+mitoA.m4 <- lmer (mito ~ bin + habitat + (1|id) + (1|tissue), data=mitoA.data)
+mitoA.m5 <- lmer (mito ~ bin + drainage + (1|id) + (1|tissue), data=mitoA.data)
+mitoA.m6 <- lmer (mito ~ habitat + drainage + (1|id) + (1|tissue), data=mitoA.data)
+mitoA.m7 <- lmer (mito ~ bin*habitat + (1|id) + (1|tissue), data=mitoA.data)
+mitoA.m8 <- lmer (mito ~ bin*drainage + (1|id) + (1|tissue), data=mitoA.data)
+mitoA.m9 <- lmer (mito ~ habitat*drainage + (1|id) + (1|tissue), data=mitoA.data)
+mitoA.m10 <- lmer (mito ~ bin + habitat + drainage + (1|id) + (1|tissue), data=mitoA.data)
+mitoA.m11 <- lmer (mito ~ bin*habitat*drainage + (1|id) + (1|tissue), data=mitoA.data)
+
+#Comparing alternative models
+AICctab(mitoA.null,mitoA.m1,mitoA.m2,mitoA.m3,mitoA.m4,mitoA.m5,mitoA.m6,mitoA.m7,mitoA.m8, mitoA.m9,mitoA.m10,mitoA.m11, base =T, weights = T)
+```
+
+Model 4 is the only model with dAICc < 2.
+
+## 4.3. Assessment of best model (mitoA.m4)
+```{r warning=FALSE}
+summary(mitoA.m4)
+tab_model(mitoA.m4, digits = 4, show.df = TRUE)
+```
+
+## 4.4. Data visualization
+```{r warning=FALSE}
+#Calculation of descriptive statistics
+mitoA.means <- aggregate(x=mitoA.data$relative.mitoA,
+                   by=list(mitoA.data$Tissue,mitoA.data$Bin, mitoA.data$Group),
+                   FUN=mean)
+mitoA.se <- aggregate(x=mitoA.data$relative.mitoA,
+                   by=list(mitoA.data$Tissue,mitoA.data$Bin, mitoA.data$Group),
+                   FUN=st.err)
+
+mitoA.means <- cbind(mitoA.means, mitoA.se$x)
+
+
+names(mitoA.means) <- c("Tissue", "Bin", "Group", "mitoA", "SE")
+
+mitoA.means$drainage<-ifelse(mitoA.means$Group=="1","Puy",
+                       ifelse(mitoA.means$Group=="2","Puy",
+                              ifelse(mitoA.means$Group=="3","Tac", "Tac"
+                                     )))
+
+mitoA.means$Habitat<-ifelse(mitoA.means$Group=="1","NS",
+                      ifelse(mitoA.means$Group=="2","S",
+                             ifelse(mitoA.means$Group=="3","NS","S"
+                             )))
+
+
+
+mitoA.means.gill <- mitoA.means[ which(mitoA.means$Tissue=="0"), ]
+mitoA.means.liver <- mitoA.means[ which(mitoA.means$Tissue=="1"), ]
+mitoA.means.muscle <- mitoA.means[ which(mitoA.means$Tissue=="2"), ]
+mitoA.means.brain <- mitoA.means[ which(mitoA.means$Tissue=="3"), ]
+
+p.gill <- ggplot(data=mitoA.means.gill, aes(x=Bin, y=mitoA, group=Group, color=Habitat, shape=drainage)) +
+  geom_line(size=1) + 
+  geom_point(size=4) + 
+  theme_classic() +
+  geom_pointrange(aes(ymin=mitoA-SE, ymax=mitoA+SE), position=position_dodge(0.0005)) +
+  scale_color_manual(values=c('#5DA5DA','#DECF3F', '#5DA5DA','#DECF3F')) + 
+  theme(legend.position = "none") + 
+  scale_shape_manual(values=c(17, 15)) +
+  geom_hline(yintercept=1, linetype="dashed") +
+  ggtitle("Gills") +
+  ylim(0,3)
+
+p.liver <- ggplot(data=mitoA.means.liver, aes(x=Bin, y=mitoA, group=Group, color=Habitat, shape=drainage)) + 
+  geom_line(size=1) + 
+  geom_point(size=4) + 
+  theme_classic() +
+  geom_pointrange(aes(ymin=mitoA-SE, ymax=mitoA+SE), position=position_dodge(0.0005)) +
+  scale_color_manual(values=c('#5DA5DA','#DECF3F', '#5DA5DA','#DECF3F')) + 
+  theme(legend.position = "none") + 
+  scale_shape_manual(values=c(17, 15)) +
+  geom_hline(yintercept=1, linetype="dashed") + 
+  ggtitle("Liver") +
+  ylim(0,3)
+
+p.muscle <- ggplot(data=mitoA.means.muscle, aes(x=Bin, y=mitoA, group=Group, color=Habitat, shape=drainage)) + 
+  geom_line(size=1) + 
+  geom_point(size=4) + 
+  theme_classic() +
+  geom_pointrange(aes(ymin=mitoA-SE, ymax=mitoA+SE), position=position_dodge(0.0005)) +
+  scale_color_manual(values=c('#5DA5DA','#DECF3F', '#5DA5DA','#DECF3F')) + 
+  theme(legend.position = "none") + 
+  scale_shape_manual(values=c(17, 15)) +
+  geom_hline(yintercept=1, linetype="dashed") + 
+  ggtitle("Muscle") +
+  ylim(0,3)
+
+p.brain <- ggplot(data=mitoA.means.brain, aes(x=Bin, y=mitoA, group=Group, color=Habitat, shape=drainage)) + 
+  geom_line(size=1) + 
+  geom_point(size=4) + 
+  theme_classic() +
+  geom_pointrange(aes(ymin=mitoA-SE, ymax=mitoA+SE), position=position_dodge(0.0005)) +
+  scale_color_manual(values=c('#5DA5DA','#DECF3F', '#5DA5DA','#DECF3F')) + 
+  theme(legend.position = "none") + 
+  scale_shape_manual(values=c(17, 15)) +
+  geom_hline(yintercept=1, linetype="dashed") + 
+  ggtitle("Brain") +
+  ylim(0,3)
+
+multiplot(p.gill,p.liver,p.muscle,p.brain, cols=2)
+```
+
+# 5. Analysis of mitochondrial function
+## 5.1. Loading data
+```{r}
+resp.data <- data<-read.csv("mitochondrialrespiration.csv", header=T)
+```
+
+## 5.2. Basal respiration
+### 5.2.1. Drug response analysis
+```{r warning=FALSE}
+#Drug response analysis
+Listbasal <- split(data, data$Biological.replicate.number)
+resultsbasal <- data.frame(matrix(ncol = 4, nrow = 0))
+
+for (y in names(Listbasal)) {
+  if (sum(is.na(Listbasal[[y]]$Basal)) == length(Listbasal[[y]]$Basal)) {
+    cat(y) 
+    cat("Is missing all data")
+    resultsbasal <- rbind(resultsbasal,c("NA", "NA", "NA", "NA"))
+  } else {
+    model<- nplr(x=Listbasal[[y]]$Concentration, y=Listbasal[[y]]$Basal, useLog=FALSE, npars = 5)
+    ID <- Listbasal[[y]]$Biological.replicate.number
+    I <- model@inflPoint$x
+    bA <- model@pars$bottom
+    tA <- model@pars$top
+    AUC <- model@AUC$Simpson
+    resultsbasal <- rbind(resultsbasal,c(ID, I, bA, tA, AUC))
+  }
+}
+
+#Retaining key results
+resultsbasal <-  resultsbasal[c(8:12)]
+
+#Change column names
+x <- c("Biological.replicate.number", "I", "bA", "tA", "AUC")
+colnames(resultsbasal) = x
+
+#Isolate and append independent variables
+idv <- data[c(1:3,5)]
+idv <-idv[!duplicated(idv), ]
+
+resultsbasal2 <- merge (idv, resultsbasal, by=c("Biological.replicate.number"))
+resultsbasal2$AUC <- as.numeric(resultsbasal2$AUC)
+
+```
+
+### 5.2.2. Model selection
+```{r}
+#Defining alternative models
+basal.null <- lm(AUC ~ 1, data=resultsbasal2)
+basal.fit.1 <- lm(AUC ~ 1 + Drainage, data=resultsbasal2)
+basal.fit.2 <- lm(AUC ~ 1 + Population, data=resultsbasal2)
+basal.fit.3 <- lm(AUC ~ 1 + Drainage+Population, data=resultsbasal2)
+basal.fit.4 <- lm(AUC ~ 1 + Drainage*Population, data=resultsbasal2)
+
+#Comparing alternative models
+AICctab(basal.null, basal.fit.1, basal.fit.2, basal.fit.3, basal.fit.4, base =T, weights = T)
+```
+
+The null model appears within dAICc <2. 
+
+### 5.2.3. Visualization
+```{r}
+p2 <- ggplot(resultsbasal2, aes(x=Drainage, y=AUC, fill=Population)) + 
+      geom_boxplot() + 
+      theme_classic() +
+      scale_fill_manual(values=c("#5DA5DA", "#DECF3F")) + 
+      theme(legend.position="none") +
+      ggtitle("Mitochondrial function")
+p2
+```
+
+## 5.3. Maximal respiration
+### 5.3.1. Drug response analysis
+```{r warning=FALSE}
+Listmax <- split(data, data$Biological.replicate.number)
+resultsmax <- data.frame(matrix(ncol = 4, nrow = 0))
+
+for (y in names(Listmax)) {
+  if (sum(is.na(Listmax[[y]]$Maximal)) == length(Listmax[[y]]$Maximal)) {
+    #skip this because ALL spare are "NA" 
+    cat(y) 
+    cat("Is missing all data")
+    resultsmax <- rbind(resultsmax,c("NA", "NA", "NA", "NA"))
+  } else {
+    model<- nplr(x=Listbasal[[y]]$Concentration, y=Listbasal[[y]]$Maximal, useLog=FALSE, npars = 5)
+    ID <- Listbasal[[y]]$Biological.replicate.number
+    I <- model@inflPoint$x
+    bA <- model@pars$bottom
+    tA <- model@pars$top
+    AUC <- model@AUC$Simpson
+    resultsmax <- rbind(resultsmax,c(ID, I, bA, tA, AUC))
+  }
+}
+
+resultsmax <-  resultsmax[c(8:12)]
+
+x <- c("Biological.replicate.number", "I", "bA", "tA", "AUC")
+colnames(resultsmax) = x
+
+idv <- data[c(1:3,5)]
+idv <-idv[!duplicated(idv), ]
+
+resultsmax2 <- merge (idv, resultsmax, by=c("Biological.replicate.number"))
+resultsmax2$AUC <- as.numeric(resultsmax2$AUC)
+
+```
+
+### 5.3.2. Model selection
+```{r}
+#Defining alternative models
+max.null <- lm(AUC ~ 1, data=resultsmax2)
+max.fit.1 <- lm(AUC ~ 1 + Drainage, data=resultsmax2)
+max.fit.2 <- lm(AUC ~ 1 + Population, data=resultsmax2)
+max.fit.3 <- lm(AUC ~ 1 + Drainage+Population, data=resultsmax2)
+max.fit.4 <- lm(AUC ~ 1 + Drainage*Population, data=resultsmax2)
+
+#Comparing alternative models
+AICctab(max.null, max.fit.1, max.fit.2, max.fit.3, max.fit.4, base =T, weights = T)
+```
+
+Model 4 is the only model with dAICc < 2.
+
+### 5.3.3. Assessment of best model (max.fit.4)
+```{r}
+Anova(max.fit.4, type = "III")
+```
+
+
+### 5.3.4. Visualization
+```{r}
+p3 <- ggplot(resultsmax2, aes(x=Drainage, y=AUC, fill=Population)) + 
+      geom_boxplot() + 
+      theme_classic() +
+      scale_fill_manual(values=c("#5DA5DA", "#DECF3F")) + 
+      theme(legend.position="none")+
+      ggtitle("Mitochondrial function")
+p3
+```
+
+
+## 5.4. Spare respiration
+### 5.4.1. Drug response analysis
+```{r warning=FALSE}
+Listspare <- split(data, data$Biological.replicate.number)
+resultsspare <- data.frame(matrix(ncol = 4, nrow = 0))
+
+for (y in names(Listspare)) {
+  if (sum(is.na(Listspare[[y]]$Spare)) == length(Listspare[[y]]$Spare)) {
+    #skip this because ALL spare are "NA" 
+    cat(y) 
+    cat("Is missing all data")
+    resultsspare <- rbind(resultsspare,c("NA", "NA", "NA", "NA"))
+  } else {
+    model<- nplr(x=Listspare[[y]]$Concentration, y=Listspare[[y]]$Spare, useLog=FALSE, npars = 5)
+    ID <- Listspare[[y]]$Biological.replicate.number
+    I <- model@inflPoint$x
+    bA <- model@pars$bottom
+    tA <- model@pars$top
+    AUC <- model@AUC$Simpson
+    resultsspare <- rbind(resultsspare,c(ID, I, bA, tA, AUC))
+  }
+}
+
+resultsspare <-  resultsspare[c(8:12)]
+
+x <- c("Biological.replicate.number", "I", "bA", "tA", "AUC")
+colnames(resultsspare) = x
+
+idv <- data[c(1:3,5)]
+idv <-idv[!duplicated(idv), ]
+
+resultsspare2 <- merge (idv, resultsspare, by=c("Biological.replicate.number"))
+
+```
+
+### 5.4.2. Model selection
+```{r}
+#Defining alternative models
+spare.null <- lm(AUC ~ 1, data=resultsspare2)
+spare.fit.1 <- lm(AUC ~ 1 + Drainage, data=resultsspare2)
+spare.fit.2 <- lm(AUC ~ 1 + Population, data=resultsspare2)
+spare.fit.3 <- lm(AUC ~ 1 + Drainage+Population, data=resultsspare2)
+spare.fit.4 <- lm(AUC ~ 1 + Drainage*Population, data=resultsspare2)
+
+#Comparing alternative models
+AICctab(spare.null, spare.fit.1, spare.fit.2, spare.fit.3, spare.fit.4, base =T, weights = T)
+```
+
+Model 4 is the only model with dAICc < 2.
+
+### 5.4.3. Assessment of best model (spare.fit.4)
+```{r}
+Anova(spare.fit.4, type = "III")
+```
+
+
+### 5.4.4. Visualization
+```{r}
+p1 <- ggplot(resultsspare2, aes(x=Drainage, y=AUC, fill=Population)) + 
+      geom_boxplot() + 
+      theme_classic() +
+      scale_fill_manual(values=c("#5DA5DA", "#DECF3F")) + 
+      theme(legend.position="none")+
+      ggtitle("Mitochondrial function")
+p1
+```
+
+## 5.5. Visualization of response curves
+### 5.5.1. Basal respiration
+```{r message=FALSE, warning=FALSE}
+tacns<-data[which(data$ID == 'TacNS'),]
+tacs<-data[which(data$ID == 'TacS'),]
+puyns<-data[which(data$ID == 'PuyNS'),]
+puys<-data[which(data$ID == 'PuyS'),]
+pichns<-data[which(data$ID == 'PichNS'),]
+pichs<-data[which(data$ID == 'PichS'),]
+
+Basaltacns <- nplr(x=tacns$Concentration, y=tacns$Basal, useLog=FALSE)
+Basaltacs <- nplr(x=tacs$Concentration, y=tacs$Basal, useLog=FALSE)
+Basalpuyns <- nplr(x=puyns$Concentration, y=puyns$Basal, useLog=FALSE)
+Basalpuys <- nplr(x=puys$Concentration, y=puys$Basal, useLog=FALSE)
+Basalpichns <- nplr(x=pichns$Concentration, y=pichns$Basal, useLog=FALSE)
+Basalpichs <- nplr(x=pichs$Concentration, y=pichs$Basal, useLog=FALSE)
+
+
+x1 <- data$Concentration; y1 <- data$Basal
+x2 <- getXcurve(Basaltacns); y2 <- getYcurve(Basaltacns)
+x3 <- getXcurve(Basaltacs); y3 <- getYcurve(Basaltacs)
+x4 <- getXcurve(Basalpuyns); y4 <- getYcurve(Basalpuyns)
+x5 <- getXcurve(Basalpuys); y5 <- getYcurve(Basalpuys)
+x6 <- getXcurve(Basalpichns); y6 <- getYcurve(Basalpichns)
+x7 <- getXcurve(Basalpichs); y7 <- getYcurve(Basalpichs)
+
+data1<-data.frame(x1,y1)
+data2<-data.frame(x2,y2)
+data3<-data.frame(x3,y3)
+data4<-data.frame(x4,y4)
+data5<-data.frame(x5,y5)
+data6<-data.frame(x6,y6)
+data7<-data.frame(x7,y7)
+
+data1tacns<-data.frame(tacns$Concentration,tacns$Basal)
+data1tacs<-data.frame(tacs$Concentration,tacs$Basal)
+data2tacns<-data.frame(x2,y2)
+data3tacs<-data.frame(x3,y3)
+PlotBasalTac <- ggplot(data1tacns,aes(tacns$Concentration,tacns$Basal)) + geom_point(color="#5DA5DA") +
+  geom_point(data=data1tacs,aes(tacs$Concentration,tacs$Basal), color="#DECF3F") +
+  ylab("Basal respiratory capacity") + xlab("H2S concentration") +  xlim(0, 100) + 
+  geom_line(data=data2tacns,aes(x2,y2),color="#5DA5DA", linetype=1)+geom_line(data=data3tacs,aes(x3,y3),color="#DECF3F", linetype=1) + theme_classic()+
+  ggtitle("Basal respiration: Tacotalpa")
+
+
+dataPuyns<-data.frame(puyns$Concentration,puyns$Basal)
+dataPuys<-data.frame(puys$Concentration,puys$Basal)
+data4Puyns<-data.frame(x4,y4)
+data5PuyS<-data.frame(x5,y5)
+PlotBasalPuy <- ggplot(dataPuyns,aes(puyns$Concentration,puyns$Basal)) + geom_point(color="#5DA5DA") +
+  geom_point(data=dataPuys,aes(puys$Concentration,puys$Basal), color="#DECF3F") +
+  ylab("Basal respiratory capacity") + xlab("H2S concentration") +  xlim(0, 100) + 
+  geom_line(data=data4Puyns,aes(x4,y4),color="#5DA5DA", linetype=1)+geom_line(data=data5PuyS,aes(x5,y5),color="#DECF3F", linetype=1) + theme_classic()+
+  ggtitle("Basal respiration: Puyacatengo")
+
+
+dataPichns<-data.frame(pichns$Concentration,pichns$Basal)
+dataPichs<-data.frame(pichs$Concentration,pichs$Basal)
+data6Pichns<-data.frame(x6,y6)
+data7Pichs<-data.frame(x7,y7)
+PlotBasalPich <- ggplot(dataPichns,aes(pichns$Concentration,pichns$Basal)) + geom_point(color="#5DA5DA") +
+  geom_point(data=dataPichs,aes(pichs$Concentration,pichs$Basal), color="#DECF3F") +
+  ylab("Basal respiratory capacity") + xlab("H2S concentration") +  xlim(0, 100) + 
+  geom_line(data=data6Pichns,aes(x6,y6),color="#5DA5DA", linetype=1)+geom_line(data=data7Pichs,aes(x7,y7),color="#DECF3F", linetype=1) + theme_classic()+
+  ggtitle("Basal respiration: Pichucalco")
+
+multiplot(PlotBasalTac,PlotBasalPuy,PlotBasalPich, cols=2)
+```
+
+### 5.5.2. Maximal respiration
+```{r message=FALSE, warning=FALSE}
+tacns<-data[which(data$ID == 'TacNS'),]
+tacs<-data[which(data$ID == 'TacS'),]
+puyns<-data[which(data$ID == 'PuyNS'),]
+puys<-data[which(data$ID == 'PuyS'),]
+pichns<-data[which(data$ID == 'PichNS'),]
+pichs<-data[which(data$ID == 'PichS'),]
+
+Maximaltacns <- nplr(x=tacns$Concentration, y=tacns$Maximal, useLog=FALSE)
+Maximaltacs <- nplr(x=tacs$Concentration, y=tacs$Maximal, useLog=FALSE)
+Maximalpuyns <- nplr(x=puyns$Concentration, y=puyns$Maximal, useLog=FALSE)
+Maximalpuys <- nplr(x=puys$Concentration, y=puys$Maximal, useLog=FALSE)
+Maximalpichns <- nplr(x=pichns$Concentration, y=pichns$Maximal, useLog=FALSE)
+Maximalpichs <- nplr(x=pichs$Concentration, y=pichs$Maximal, useLog=FALSE)
+
+
+x1 <- data$Concentration; y1 <- data$Maximal
+x2 <- getXcurve(Maximaltacns); y2 <- getYcurve(Maximaltacns)
+x3 <- getXcurve(Maximaltacs); y3 <- getYcurve(Maximaltacs)
+x4 <- getXcurve(Maximalpuyns); y4 <- getYcurve(Maximalpuyns)
+x5 <- getXcurve(Maximalpuys); y5 <- getYcurve(Maximalpuys)
+x6 <- getXcurve(Maximalpichns); y6 <- getYcurve(Maximalpichns)
+x7 <- getXcurve(Maximalpichs); y7 <- getYcurve(Maximalpichs)
+
+data1<-data.frame(x1,y1)
+data2<-data.frame(x2,y2)
+data3<-data.frame(x3,y3)
+data4<-data.frame(x4,y4)
+data5<-data.frame(x5,y5)
+data6<-data.frame(x6,y6)
+data7<-data.frame(x7,y7)
+
+data1tacns<-data.frame(tacns$Concentration,tacns$Maximal)
+data1tacs<-data.frame(tacs$Concentration,tacs$Maximal)
+data2tacns<-data.frame(x2,y2)
+data3tacs<-data.frame(x3,y3)
+PlotMaximalTac <- ggplot(data1tacns,aes(tacns$Concentration,tacns$Maximal)) + geom_point(color="#5DA5DA") +
+  geom_point(data=data1tacs,aes(tacs$Concentration,tacs$Maximal), color="#DECF3F") +
+  ylab("Maximal respiratory capacity") + xlab("H2S concentration") +  xlim(0, 100) + 
+  geom_line(data=data2tacns,aes(x2,y2),color="#5DA5DA", linetype=1)+geom_line(data=data3tacs,aes(x3,y3),color="#DECF3F", linetype=1) + theme_classic()+
+  ggtitle("Maximal repiration: Tacotalpa")
+
+
+dataPuyns<-data.frame(puyns$Concentration,puyns$Maximal)
+dataPuys<-data.frame(puys$Concentration,puys$Maximal)
+data4Puyns<-data.frame(x4,y4)
+data5PuyS<-data.frame(x5,y5)
+PlotMaximalPuy <- ggplot(dataPuyns,aes(puyns$Concentration,puyns$Maximal)) + geom_point(color="#5DA5DA") +
+  geom_point(data=dataPuys,aes(puys$Concentration,puys$Maximal), color="#DECF3F") +
+  ylab("Maximal respiratory capacity") + xlab("H2S concentration") +  xlim(0, 100) + 
+  geom_line(data=data4Puyns,aes(x4,y4),color="#5DA5DA", linetype=1)+geom_line(data=data5PuyS,aes(x5,y5),color="#DECF3F", linetype=1) + theme_classic()+
+  ggtitle("Maximal repiration: Puyacatengo")
+
+
+dataPichns<-data.frame(pichns$Concentration,pichns$Maximal)
+dataPichs<-data.frame(pichs$Concentration,pichs$Maximal)
+data6Pichns<-data.frame(x6,y6)
+data7Pichs<-data.frame(x7,y7)
+PlotMaximalPich <- ggplot(dataPichns,aes(pichns$Concentration,pichns$Maximal)) + geom_point(color="#5DA5DA") +
+  geom_point(data=dataPichs,aes(pichs$Concentration,pichs$Maximal), color="#DECF3F") +
+  ylab("Maximal respiratory capacity") + xlab("H2S concentration") +  xlim(0, 100) + 
+  geom_line(data=data6Pichns,aes(x6,y6),color="#5DA5DA", linetype=1)+geom_line(data=data7Pichs,aes(x7,y7),color="#DECF3F", linetype=1) + theme_classic()+
+  ggtitle("Maximal repiration: Pichucalco")
+
+
+```
+
+### 5.5.3. Spare respiration
+```{r message=FALSE, warning=FALSE}
+tacns<-data[which(data$ID == 'TacNS'),]
+tacs<-data[which(data$ID == 'TacS'),]
+puyns<-data[which(data$ID == 'PuyNS'),]
+puys<-data[which(data$ID == 'PuyS'),]
+pichns<-data[which(data$ID == 'PichNS'),]
+pichs<-data[which(data$ID == 'PichS'),]
+
+Sparetacns <- nplr(x=tacns$Concentration, y=tacns$Spare, useLog=FALSE)
+Sparetacs <- nplr(x=tacs$Concentration, y=tacs$Spare, useLog=FALSE)
+Sparepuyns <- nplr(x=puyns$Concentration, y=puyns$Spare, useLog=FALSE)
+Sparepuys <- nplr(x=puys$Concentration, y=puys$Spare, useLog=FALSE)
+Sparepichns <- nplr(x=pichns$Concentration, y=pichns$Spare, useLog=FALSE)
+Sparepichs <- nplr(x=pichs$Concentration, y=pichs$Spare, useLog=FALSE)
+
+
+x1 <- data$Concentration; y1 <- data$Spare
+x2 <- getXcurve(Sparetacns); y2 <- getYcurve(Sparetacns)
+x3 <- getXcurve(Sparetacs); y3 <- getYcurve(Sparetacs)
+x4 <- getXcurve(Sparepuyns); y4 <- getYcurve(Sparepuyns)
+x5 <- getXcurve(Sparepuys); y5 <- getYcurve(Sparepuys)
+x6 <- getXcurve(Sparepichns); y6 <- getYcurve(Sparepichns)
+x7 <- getXcurve(Sparepichs); y7 <- getYcurve(Sparepichs)
+
+data1<-data.frame(x1,y1)
+data2<-data.frame(x2,y2)
+data3<-data.frame(x3,y3)
+data4<-data.frame(x4,y4)
+data5<-data.frame(x5,y5)
+data6<-data.frame(x6,y6)
+data7<-data.frame(x7,y7)
+
+data1tacns<-data.frame(tacns$Concentration,tacns$Spare)
+data1tacs<-data.frame(tacs$Concentration,tacs$Spare)
+data2tacns<-data.frame(x2,y2)
+data3tacs<-data.frame(x3,y3)
+PlotSpareTac <- ggplot(data1tacns,aes(tacns$Concentration,tacns$Spare)) + geom_point(color="#5DA5DA") +
+  geom_point(data=data1tacs,aes(tacs$Concentration,tacs$Spare), color="#DECF3F") +
+  ylab("Spare respiratory capacity") + xlab("H2S concentration") +  xlim(0, 100) + 
+  geom_line(data=data2tacns,aes(x2,y2),color="#5DA5DA", linetype=1)+geom_line(data=data3tacs,aes(x3,y3),color="#DECF3F", linetype=1) + theme_classic()+
+  ggtitle("Tacotalpa")
+
+dataPuyns<-data.frame(puyns$Concentration,puyns$Spare)
+dataPuys<-data.frame(puys$Concentration,puys$Spare)
+data4Puyns<-data.frame(x4,y4)
+data5PuyS<-data.frame(x5,y5)
+PlotSparePuy <- ggplot(dataPuyns,aes(puyns$Concentration,puyns$Spare)) + geom_point(color="#5DA5DA") +
+  geom_point(data=dataPuys,aes(puys$Concentration,puys$Spare), color="#DECF3F") +
+  ylab("Spare respiratory capacity") + xlab("H2S concentration") +  xlim(0, 100) + 
+  geom_line(data=data4Puyns,aes(x4,y4),color="#5DA5DA", linetype=1)+geom_line(data=data5PuyS,aes(x5,y5),color="#DECF3F", linetype=1) + theme_classic()+
+  ggtitle("Puyacatengo")
+
+dataPichns<-data.frame(pichns$Concentration,pichns$Spare)
+dataPichs<-data.frame(pichs$Concentration,pichs$Spare)
+data6Pichns<-data.frame(x6,y6)
+data7Pichs<-data.frame(x7,y7)
+PlotSparePich <- ggplot(dataPichns,aes(pichns$Concentration,pichns$Spare)) + geom_point(color="#5DA5DA") +
+  geom_point(data=dataPichs,aes(pichs$Concentration,pichs$Spare), color="#DECF3F") +
+  ylab("Spare respiratory capacity") + xlab("H2S concentration") +  xlim(0, 100) + 
+  geom_line(data=data6Pichns,aes(x6,y6),color="#5DA5DA", linetype=1)+geom_line(data=data7Pichs,aes(x7,y7),color="#DECF3F", linetype=1) + theme_classic()+
+  ggtitle("Pichucalco")
+
+multiplot(PlotSpareTac,PlotSparePuy,PlotSparePich, cols=2)
+```
+
