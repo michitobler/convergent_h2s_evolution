@@ -4,7 +4,7 @@ This repository includes data and code associated with Greenway et al.: "Converg
 ## Biochemical and physiologial analyses
 Four datasets were associated with biochemical and physiological analyses:
 - [Measurements of COX activity](https://github.com/michitobler/convergent_h2s_evolution/blob/master/physiology/cox_data_final.csv)
-- [Measurements of SQR activity](https://github.com/michitobler/convergent_h2s_evolution/blob/master/physiolhttps://github.com/michitobler/convergent_h2s_evolution/blob/master/physiology/greenway_etal_analyses2.Rmdogy/SQRactivity.csv)
+- [Measurements of SQR activity](https://github.com/michitobler/convergent_h2s_evolution/blob/master/physiology//SQRactivity.csv)
 - [Measurements of mitochondrial H2S concentrations](https://github.com/michitobler/convergent_h2s_evolution/blob/master/physiology/mitoA_data.csv)
 - [Measurements of mitochondrial respiration](https://github.com/michitobler/convergent_h2s_evolution/blob/master/physiology/mitochondrialrespiration.csv)
 
