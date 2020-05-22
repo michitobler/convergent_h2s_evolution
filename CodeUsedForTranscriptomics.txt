@@ -1,0 +1,441 @@
+################################################
+#Trimming
+################################################
+trim_galore  --quality 0 --fastqc_args "--noextract --nogroup" --stringency 6 -e 0.1 --gzip --length 50 --output_dir qual0_FastQCs/ --paired $Raw_read1 $Raw_read2
+
+trim_galore  --quality 24 --fastqc_args "--noextract --nogroup" --stringency 6 -e 0.1 --gzip --length 50 --output_dir qual24_FastQCs/ --paired $TrimQual0_read1 $TrimQual0_read2
+
+
+
+################################################
+#mapping
+################################################
+bwa-0.7.12/bwa mem -t 4 -R "@RG\tID:$SampleName\tSM:$SampleName\tLB:$SampleName\tPL:HiSeq2500" PmexicanaGenome.fna $read1 $read2 | samtools-1.2/samtools view -h -b - | samtools-1.2/samtools sort - $output
+
+
+################################################################################################################################################################################################
+																			#Molecular Evolution Analyses#
+################################################################################################################################################################################################
+
+################################################
+####GATK
+################################################
+#Indel Realignment
+    java -jar GenomeAnalysisTK.jar -T RealignerTargetCreator -R PmexicanaGenome.fna -I $alignment -o $output.realignertargets.list
+
+    java -jar GenomeAnalysisTK-3.5/GenomeAnalysisTK.jar -T IndelRealigner -R PmexicanaGenome.fna -I $alignment -targetIntervals $realignertargets -o $output.bam
+
+#Variant Calling
+    java -jar GenomeAnalysisTK-3.5/GenomeAnalysisTK.jar -T UnifiedGenotyper -R PmexicanaGenome.fna -nt 1 -nct 6 -I $Sample1 -I $Sample2 -I $Sample3 -I $Sample4 -I $Sample5 -I $Sample6 -stand_call_conf 20.0 -stand_emit_conf 10.0 -out_mode EMIT_ALL_SITES -o $output.vcf 
+    tabix-0.2.6/bgzip $output.vcf
+    tabix-0.2.6/tabix -p vcf $output.vcf.gz
+
+
+################################################
+####fill positions lacking sequence data in vcf file with Ns
+################################################
+####Create VCF with Ns in place of reference sequence (i.e. areas without sequencing coverage)
+	# Create temp vcf file
+		zcat PreN/$PopName.vcf.gz > $PopName.temp.vcf
+
+	# Extract the header and store in temporary file 
+		grep "#" $PopName.temp.vcf > header.$PopName.temp.vcf
+
+	# Replace 4th column (reference) with N, if 8th column = "."
+		awk 'BEGIN{OFS="\t"} NR == 1; NR > 1 { $4 = ($8 == "." ? "N" : $4) } 1' $PopName.temp.vcf > $PopName.temp_N.vcf
+
+	# Pull out the non-header part of the vcf
+		grep -v "#" $PopName.temp_N.vcf > $PopName.new.vcf
+
+	# Combine the header and vcf to form a new vcf with Ns for reference allele
+		cat header.$PopName.temp.vcf $PopName.new.vcf > $PopName.N.vcf
+
+	#Create VCF with only regions with sequence data to be used to create bed mask file
+		awk 'BEGIN{OFS="\t"} $8 != "."' $PopName.new.vcf > $PopName.N.mask.vcf 
+
+	#Zip files for down the pipe use
+		tabix-0.2.6/bgzip $PopName.N.vcf 
+		tabix-0.2.6/tabix $PopName.N.vcf.gz
+		tabix-0.2.6/bgzip $PopName.N.mask.vcf 
+		tabix-0.2.6/tabix $PopName.N.mask.vcf.gz
+
+	# Remove temporary files 
+		rm header.$PopName.temp.vcf
+		rm $PopName.new.vcf
+		rm $PopName.temp.vcf
+		rm $PopName.temp_N.vcf
+		
+
+#####Convert Reference Genome Sequences to all Ns for later use in consensus calling
+	#create bed genomefile for use in creating bedmask
+		bedtools2/bin/bedtools genomecov -bga -i $PopName.N.mask.vcf.gz -g PmexicanaGenome.ATGC_genomefile.txt > $PopName.coverage.txt
+
+	#pull out regions w/ 0 coverage to serve as mask bed file
+		awk 'BEGIN{OFS="\t"} $4 == "0"' $PopName.coverage.txt > $PopName.mask.bed
+
+	# convert reference sequence to all Ns, so that any region lacking coverage (where the reference would be called) will call an N
+		bedtools2/bin/bedtools maskfasta -fi PmexicanaGenome.ATGC.fa -bed $PopName.mask.bed -fo $PopName.Mexicana.N.fa
+
+		
+####Set Genotype to major allele
+		bcftools-1.5/bcftools +setGT $input.N.vcf.gz -o $input.genotype.vcf.gz -O z -- -t a -n M
+		tabix-0.2.6/tabix $input.genotype.vcf.gz
+
+
+################################################
+		#Generating Consensus Sequences#
+################################################
+####Call consensus for each exon
+		samtools-1.2/samtools faidx LsulphS.Mexicana.N.fa $GeneScaffold:$GeneStart-$GeneEnd | bcftools-1.3/bcftools consensus LsulphS.N.vcf.gz > LsulphS.fa.$GeneName
+		samtools-1.2/samtools faidx LperuNS.Mexicana.N.fa $GeneScaffold:$GeneStart-$GeneEnd | bcftools-1.3/bcftools consensus LperuNS.N.vcf.gz > LperuNS.fa.$GeneName
+		samtools-1.2/samtools faidx GholbrookiS.Mexicana.N.fa $GeneScaffold:$GeneStart-$GeneEnd | bcftools-1.3/bcftools consensus GholbrookiS.N.vcf.gz > GholbrookiS.fa.$GeneName
+		samtools-1.2/samtools faidx GholbrookiNS.Mexicana.N.fa $GeneScaffold:$GeneStart-$GeneEnd | bcftools-1.3/bcftools consensus GholbrookiNS.N.vcf.gz > GholbrookiNS.fa.$GeneName
+		samtools-1.2/samtools faidx PlatipinnaS.Mexicana.N.fa $GeneScaffold:$GeneStart-$GeneEnd | bcftools-1.3/bcftools consensus PlatipinnaS.N.vcf.gz > PlatipinnaS.fa.$GeneName
+		samtools-1.2/samtools faidx PlatipinnaNS.Mexicana.N.fa $GeneScaffold:$GeneStart-$GeneEnd | bcftools-1.3/bcftools consensus PlatipinnaNS.N.vcf.gz > PlatipinnaNS.fa.$GeneName
+		samtools-1.2/samtools faidx XhelleriiS.Mexicana.N.fa $GeneScaffold:$GeneStart-$GeneEnd | bcftools-1.3/bcftools consensus XhelleriiS.N.vcf.gz > XhelleriiS.fa.$GeneName
+		samtools-1.2/samtools faidx XhelleriiNS.Mexicana.N.fa $GeneScaffold:$GeneStart-$GeneEnd | bcftools-1.3/bcftools consensus XhelleriiNS.N.vcf.gz > XhelleriiNS.fa.$GeneName
+		samtools-1.2/samtools faidx GeurystomaS.Mexicana.N.fa $GeneScaffold:$GeneStart-$GeneEnd | bcftools-1.3/bcftools consensus GeurystomaS.N.vcf.gz > GeurystomaS.fa.$GeneName
+		samtools-1.2/samtools faidx GsexradiataS.Mexicana.N.fa $GeneScaffold:$GeneStart-$GeneEnd | bcftools-1.3/bcftools consensus GsexradiataS.N.vcf.gz > GsexradiataS.fa.$GeneName
+		samtools-1.2/samtools faidx GsexradiataNS.Mexicana.N.fa $GeneScaffold:$GeneStart-$GeneEnd | bcftools-1.3/bcftools consensus GsexradiataNS.N.vcf.gz > GsexradiataNS.fa.$GeneName
+		samtools-1.2/samtools faidx PbimaculatusS.Mexicana.N.fa $GeneScaffold:$GeneStart-$GeneEnd | bcftools-1.3/bcftools consensus PbimaculatusS.N.vcf.gz > PbimaculatusS.fa.$GeneName
+		samtools-1.2/samtools faidx PbimaculatusNS.Mexicana.N.fa $GeneScaffold:$GeneStart-$GeneEnd | bcftools-1.3/bcftools consensus PbimaculatusNS.N.vcf.gz > PbimaculatusNS.fa.$GeneName
+		samtools-1.2/samtools faidx PsulphS.Mexicana.N.fa $GeneScaffold:$GeneStart-$GeneEnd | bcftools-1.3/bcftools consensus PsulphS.N.vcf.gz > PsulphS.fa.$GeneName
+		samtools-1.2/samtools faidx PlimantouriNS.Mexicana.N.fa $GeneScaffold:$GeneStart-$GeneEnd | bcftools-1.3/bcftools consensus PlimantouriNS.N.vcf.gz > PlimantouriNS.fa.$GeneName
+		samtools-1.2/samtools faidx PmexPichuNS.Mexicana.N.fa $GeneScaffold:$GeneStart-$GeneEnd | bcftools-1.3/bcftools consensus PmexPichuNS.N.vcf.gz > PmexPichuNS.fa.$GeneName
+		samtools-1.2/samtools faidx PmexPuyaS.Mexicana.N.fa $GeneScaffold:$GeneStart-$GeneEnd | bcftools-1.3/bcftools consensus PmexPuyaS.N.vcf.gz > PmexPuyaS.fa.$GeneName
+		samtools-1.2/samtools faidx PmexPuyaNS.Mexicana.N.fa $GeneScaffold:$GeneStart-$GeneEnd | bcftools-1.3/bcftools consensus PmexPuyaNS.N.vcf.gz > PmexPuyaNS.fa.$GeneName
+		samtools-1.2/samtools faidx PmexTacoS.Mexicana.N.fa $GeneScaffold:$GeneStart-$GeneEnd | bcftools-1.3/bcftools consensus PmexTacoS.N.vcf.gz > PmexTacoS.fa.$GeneName
+		samtools-1.2/samtools faidx PmexTacoNS.Mexicana.N.fa $GeneScaffold:$GeneStart-$GeneEnd | bcftools-1.3/bcftools consensus PmexTacoNS.N.vcf.gz > PmexTacoNS.fa.$GeneName
+
+
+####Move exons on opposite strands to new directory, $Strand information comes from the .gff file for the PmexicanaGenome.fna
+	if [ $Strand = "-" ]; then
+		mv results NeedReverseCompliment/
+		echo "$Gene $Strand moved!"
+	else
+		echo "$Gene $Strand good to go!"
+	fi 
+
+
+####Reverse complement and move back with other exons
+		EMBOSS-6.6.0/emboss/revseq NeedReverseCompliment/GeurystomaS.fa.$gene -reverse -complement -outseq GeurystomaS.fa.$gene
+		EMBOSS-6.6.0/emboss/revseq NeedReverseCompliment/GholbrookiNS.fa.$gene -reverse -complement -outseq GholbrookiNS.fa.$gene
+		EMBOSS-6.6.0/emboss/revseq NeedReverseCompliment/GholbrookiS.fa.$gene -reverse -complement -outseq GholbrookiS.fa.$gene
+		EMBOSS-6.6.0/emboss/revseq NeedReverseCompliment/GsexradiataNS.fa.$gene -reverse -complement -outseq GsexradiataNS.fa.$gene
+		EMBOSS-6.6.0/emboss/revseq NeedReverseCompliment/GsexradiataS.fa.$gene -reverse -complement -outseq GsexradiataS.fa.$gene
+		EMBOSS-6.6.0/emboss/revseq NeedReverseCompliment/LperuNS.fa.$gene -reverse -complement -outseq LperuNS.fa.$gene
+		EMBOSS-6.6.0/emboss/revseq NeedReverseCompliment/LsulphS.fa.$gene -reverse -complement -outseq LsulphS.fa.$gene
+		EMBOSS-6.6.0/emboss/revseq NeedReverseCompliment/PbimaculatusNS.fa.$gene -reverse -complement -outseq PbimaculatusNS.fa.$gene
+		EMBOSS-6.6.0/emboss/revseq NeedReverseCompliment/PbimaculatusS.fa.$gene -reverse -complement -outseq PbimaculatusS.fa.$gene
+		EMBOSS-6.6.0/emboss/revseq NeedReverseCompliment/PgilliiNS.fa.$gene -reverse -complement -outseq PgilliiNS.fa.$gene
+		EMBOSS-6.6.0/emboss/revseq NeedReverseCompliment/PgilliiS.fa.$gene -reverse -complement -outseq PgilliiS.fa.$gene
+		EMBOSS-6.6.0/emboss/revseq NeedReverseCompliment/PlatipinnaNS.fa.$gene -reverse -complement -outseq PlatipinnaNS.fa.$gene
+		EMBOSS-6.6.0/emboss/revseq NeedReverseCompliment/PlatipinnaS.fa.$gene -reverse -complement -outseq PlatipinnaS.fa.$gene
+		EMBOSS-6.6.0/emboss/revseq NeedReverseCompliment/PlimantouriNS.fa.$gene -reverse -complement -outseq PlimantouriNS.fa.$gene
+		EMBOSS-6.6.0/emboss/revseq NeedReverseCompliment/PmexPichuNS.fa.$gene -reverse -complement -outseq PmexPichuNS.fa.$gene
+		EMBOSS-6.6.0/emboss/revseq NeedReverseCompliment/PmexPuyaNS.fa.$gene -reverse -complement -outseq PmexPuyaNS.fa.$gene
+		EMBOSS-6.6.0/emboss/revseq NeedReverseCompliment/PmexPuyaS.fa.$gene -reverse -complement -outseq PmexPuyaS.fa.$gene
+		EMBOSS-6.6.0/emboss/revseq NeedReverseCompliment/PmexTacoNS.fa.$gene -reverse -complement -outseq PmexTacoNS.fa.$gene
+		EMBOSS-6.6.0/emboss/revseq NeedReverseCompliment/PmexTacoS.fa.$gene -reverse -complement -outseq PmexTacoS.fa.$gene
+		EMBOSS-6.6.0/emboss/revseq NeedReverseCompliment/PsulphS.fa.$gene -reverse -complement -outseq PsulphS.fa.$gene
+		EMBOSS-6.6.0/emboss/revseq NeedReverseCompliment/XhelleriiNS.fa.$gene -reverse -complement -outseq XhelleriiNS.fa.$gene
+		EMBOSS-6.6.0/emboss/revseq NeedReverseCompliment/XhelleriiS.fa.$gene -reverse -complement -outseq XhelleriiS.fa.$gene
+
+
+####Put species name and exon in fasta header using pythong script "replace_name.py"
+		python replace_name.py --f "GeurystomaS.fa.$gene" --r "GeurystS" --o "GeurystomaS.fa.n.$gene"
+		python replace_name.py --f "GholbrookiNS.fa.$gene" --r "GholbrNS" --o "GholbrookiNS.fa.n.$gene"
+		python replace_name.py --f "GholbrookiS.fa.$gene" --r "GholbroS" --o "GholbrookiS.fa.n.$gene"
+		python replace_name.py --f "GsexradiataNS.fa.$gene" --r "GsexraNS" --o "GsexradiataNS.fa.n.$gene"
+		python replace_name.py --f "GsexradiataS.fa.$gene" --r "GsexradS" --o "GsexradiataS.fa.n.$gene"
+		python replace_name.py --f "LperuNS.fa.$gene" --r "L_peruNS" --o "LperuNS.fa.n.$gene"
+		python replace_name.py --f "LsulphS.fa.$gene" --r "L_sulphS" --o "LsulphS.fa.n.$gene"
+		python replace_name.py --f "PbimaculatusNS.fa.$gene" --r "PbimacNS" --o "PbimaculatusNS.fa.n.$gene"
+		python replace_name.py --f "PbimaculatusS.fa.$gene" --r "PbimacuS" --o "PbimaculatusS.fa.n.$gene"
+		python replace_name.py --f "PgilliiNS.fa.$gene" --r "PgilliNS" --o "PgilliiNS.fa.n.$gene"
+		python replace_name.py --f "PgilliiS.fa.$gene" --r "P_gilliS" --o "PgilliiS.fa.n.$gene"
+		python replace_name.py --f "PlatipinnaNS.fa.$gene" --r "PlatipNS" --o "PlatipinnaNS.fa.n.$gene"
+		python replace_name.py --f "PlatipinnaS.fa.$gene" --r "PlatipiS" --o "PlatipinnaS.fa.n.$gene"
+		python replace_name.py --f "PlimantouriNS.fa.$gene" --r "PlimanNS" --o "PlimantouriNS.fa.n.$gene"
+		python replace_name.py --f "PmexPichuNS.fa.$gene" --r "PmexPiNS" --o "PmexPichuNS.fa.n.$gene"
+		python replace_name.py --f "PmexPuyaNS.fa.$gene" --r "PmexPuNS" --o "PmexPuyaNS.fa.n.$gene"
+		python replace_name.py --f "PmexPuyaS.fa.$gene" --r "PmexPuyS" --o "PmexPuyaS.fa.n.$gene"
+		python replace_name.py --f "PmexTacoNS.fa.$gene" --r "PmexTaNS" --o "PmexTacoNS.fa.n.$gene"
+		python replace_name.py --f "PmexTacoS.fa.$gene" --r "Pmex_TaS" --o "PmexTacoS.fa.n.$gene"
+		python replace_name.py --f "PsulphS.fa.$gene" --r "PsulphuS" --o "PsulphS.fa.n.$gene"
+		python replace_name.py --f "XhelleriiNS.fa.$gene" --r "XhelleNS" --o "XhelleriiNS.fa.n.$gene"
+		python replace_name.py --f "XhelleriiS.fa.$gene" --r "XhellerS" --o "XhelleriiS.fa.n.$gene"
+
+
+####Combine the exons for each protein and species
+		cat GeurystomaS.fa.n.$gene.* > GeurystomaS.$gene
+		cat GholbrookiNS.fa.n.$gene.* > GholbrookiNS.$gene
+		cat GholbrookiS.fa.n.$gene.* > GholbrookiS.$gene
+		cat GsexradiataNS.fa.n.$gene.* > GsexradiataNS.$gene
+		cat GsexradiataS.fa.n.$gene.* > GsexradiataS.$gene
+		cat LperuNS.fa.n.$gene.* > LperuNS.$gene
+		cat LsulphS.fa.n.$gene.* > LsulphS.$gene
+		cat PbimaculatusNS.fa.n.$gene.* > PbimaculatusNS.$gene
+		cat PbimaculatusS.fa.n.$gene.* > PbimaculatusS.$gene
+		cat PgilliiNS.fa.n.$gene.* > PgilliiNS.$gene
+		cat PgilliiS.fa.n.$gene.* > PgilliiS.$gene
+		cat PlatipinnaNS.fa.n.$gene.* > PlatipinnaNS.$gene
+		cat PlatipinnaS.fa.n.$gene.* > PlatipinnaS.$gene
+		cat PlimantouriNS.fa.n.$gene.* > PlimantouriNS.$gene
+		cat PmexPichuNS.fa.n.$gene.* > PmexPichuNS.$gene
+		cat PmexPuyaNS.fa.n.$gene.* > PmexPuyaNS.$gene
+		cat PmexPuyaS.fa.n.$gene.* > PmexPuyaS.$gene
+		cat PmexTacoNS.fa.n.$gene.* > PmexTacoNS.$gene
+		cat PmexTacoS.fa.n.$gene.* > PmexTacoS.$gene
+		cat PsulphS.fa.n.$gene.* > PsulphS.$gene
+		cat XhelleriiNS.fa.n.$gene.* > XhelleriiNS.$gene
+		cat XhelleriiS.fa.n.$gene.* > XhelleriiS.$gene
+
+
+####Remove extra fasta headers using "replace_name_oneHeader.py" script
+		python replace_name_oneHeader.py --f "GeurystomaS.$gene" --r "GeurystS" --o "GeurystomaS.n.$gene"
+		python replace_name_oneHeader.py --f "GholbrookiNS.$gene" --r "GholbrNS" --o "GholbrookiNS.n.$gene"
+		python replace_name_oneHeader.py --f "GholbrookiS.$gene" --r "GholbroS" --o "GholbrookiS.n.$gene"
+		python replace_name_oneHeader.py --f "GsexradiataNS.$gene" --r "GsexraNS" --o "GsexradiataNS.n.$gene"
+		python replace_name_oneHeader.py --f "GsexradiataS.$gene" --r "GsexradS" --o "GsexradiataS.n.$gene"
+		python replace_name_oneHeader.py --f "LperuNS.$gene" --r "L_peruNS" --o "LperuNS.n.$gene"
+		python replace_name_oneHeader.py --f "LsulphS.$gene" --r "L_sulphS" --o "LsulphS.n.$gene"
+		python replace_name_oneHeader.py --f "PbimaculatusNS.$gene" --r "PbimacNS" --o "PbimaculatusNS.n.$gene"
+		python replace_name_oneHeader.py --f "PbimaculatusS.$gene" --r "PbimacuS" --o "PbimaculatusS.n.$gene"
+		python replace_name_oneHeader.py --f "PgilliiNS.$gene" --r "PgilliNS" --o "PgilliiNS.n.$gene"
+		python replace_name_oneHeader.py --f "PgilliiS.$gene" --r "P_gilliS" --o "PgilliiS.n.$gene"
+		python replace_name_oneHeader.py --f "PlatipinnaNS.$gene" --r "PlatipNS" --o "PlatipinnaNS.n.$gene"
+		python replace_name_oneHeader.py --f "PlatipinnaS.$gene" --r "PlatipiS" --o "PlatipinnaS.n.$gene"
+		python replace_name_oneHeader.py --f "PlimantouriNS.$gene" --r "PlimanNS" --o "PlimantouriNS.n.$gene"
+		python replace_name_oneHeader.py --f "PmexPichuNS.$gene" --r "PmexPiNS" --o "PmexPichuNS.n.$gene"
+		python replace_name_oneHeader.py --f "PmexPuyaNS.$gene" --r "PmexPuNS" --o "PmexPuyaNS.n.$gene"
+		python replace_name_oneHeader.py --f "PmexPuyaS.$gene" --r "PmexPuyS" --o "PmexPuyaS.n.$gene"
+		python replace_name_oneHeader.py --f "PmexTacoNS.$gene" --r "PmexTaNS" --o "PmexTacoNS.n.$gene"
+		python replace_name_oneHeader.py --f "PmexTacoS.$gene" --r "Pmex_TaS" --o "PmexTacoS.n.$gene"
+		python replace_name_oneHeader.py --f "PsulphS.$gene" --r "PsulphuS" --o "PsulphS.n.$gene"
+		python replace_name_oneHeader.py --f "XhelleriiNS.$gene" --r "XhelleNS" --o "XhelleriiNS.n.$gene"
+		python replace_name_oneHeader.py --f "XhelleriiS.$gene" --r "XhellerS" --o "XhelleriiS.n.$gene"
+
+####Combine species into single fasta for alignment
+	cat *.n.$gene > $gene.fa
+
+
+####Create in-frame alignment for each sequence
+	perl translatorx_vLocal.pl -i $gene.fa -p F -c 1 -t T -o $gene.nt_ali.fasta
+
+
+####Convert fasta alignment to phylip format
+	prank -convert -d=$gene.nt_ali.fasta -o=$Gene.phy -f=phylips
+
+
+################################################
+			#Generating Trees#
+################################################
+####Create gene tree for each sequence
+	dnaml <<EOF
+	$Gene.phy
+	F
+	${Gene}.NoGroupTree.outfile
+	J
+	7
+	7
+	S
+	Y
+	F
+	${Gene}.NoGroupTree
+	EOF
+
+
+####Create another tree with renamed sulfidic lineages for codeml Branch models
+sed -e 's/GsexradS/GsexradS #1/g;
+		s/GholbroS/GholbroS #1/g;
+		s/XhellerS/XhellerS #1/g;
+		s/PbimacuS/PbimacuS #1/g;
+		s/PmexPuyS/PmexPuyS #1/g;
+		s/Pmex_TaS/Pmex_TaS #1/g;
+		s/PsulphuS/PsulphuS #1/g;
+		s/PlatipiS/PlatipiS #1/g;
+		s/L_sulphS/L_sulphS #1/g;
+		s/GeurystS/GeurystS #1/g' $Gene.SulfGroupTree
+
+
+################################################
+		#Molecular Evolution in PAML#
+################################################
+####Branch Model (change "icode = 1" for mitochondrial genes)
+		mkdir $Gene
+		mkdir $Gene/BranchModel
+		cp $Gene.phy $Gene/BranchModel/$Gene.phy #This is the phylip format, inframe sequence alignment
+		cp $Gene.SulfGroupTree $Gene/BranchModel/$Gene.SulfGroupTree
+
+		FILE="$Gene/BranchModel/codeml.ctl"
+
+		cat <<EOM >$FILE
+		seqfile = $Gene.phy     * sequence data filename
+     treefile = $Gene.SulfGroupTree      * tree structure file name
+      outfile = $Gene.BranchModel.out           * main result file name
+
+         noisy = 9  * 0,1,2,3,9: how much rubbish on the screen
+      verbose = 1  * 0: concise; 1: detailed, 2: too much
+      runmode = 0  * 0: user tree;  1: semi-automatic;  2: automatic
+                   * 3: StepwiseAddition; (4,5):PerturbationNNI; -2: pairwise
+
+      seqtype = 1  * 1:codons; 2:AAs; 3:codons-->AAs
+    CodonFreq = 3  * 0:1/61 each, 1:F1X4, 2:F3X4, 3:codon table
+*        ndata = 10
+        clock = 0  * 0:no clock, 1:clock; 2:local clock; 3:CombinedAnalysis
+       aaDist = 0  * 0:equal, +:geometric; -:linear, 1-6:G1974,Miyata,c,p,v,a
+   aaRatefile = dat/jones.dat  * only used for aa seqs with model=empirical(_F)
+                   * dayhoff.dat, jones.dat, wag.dat, mtmam.dat, or your own
+
+        model = 2
+                   * models for codons:
+                       * 0:one, 1:b, 2:2 or more dN/dS ratios for branches
+                   * models for AAs or codon-translated AAs:
+                       * 0:poisson, 1:proportional, 2:Empirical, 3:Empirical+F
+                       * 6:FromCodon, 7:AAClasses, 8:REVaa_0, 9:REVaa(nr=189)
+
+      NSsites = 0
+                   * 0:one w;1:neutral;2:selection; 3:discrete;4:freqs;
+                   * 5:gamma;6:2gamma;7:beta;8:beta&w;9:beta&gamma;
+                   * 10:beta&gamma+1; 11:beta&normal>1; 12:0&2normal>1;
+                   * 13:3normal>0
+
+        icode = 0  * 0:universal code; 1:mammalian mt; 2-10:see below
+        Mgene = 0
+                   * codon: 0:rates, 1:separate; 2:diff pi, 3:diff kapa, 4:all diff
+                   * AA: 0:rates, 1:separate
+
+    fix_kappa = 0  * 1: kappa fixed, 0: kappa to be estimated
+        kappa = 2  * initial or fixed kappa
+    fix_omega = 0  * 1: omega or omega_1 fixed, 0: estimate 
+        omega = 1 * initial or fixed omega, for codons or codon-based AAs
+
+    fix_alpha = 1  * 0: estimate gamma shape parameter; 1: fix it at alpha
+        alpha = 0. * initial or fixed alpha, 0:infinity (constant rate)
+       Malpha = 0  * different alphas for genes
+        ncatG = 10  * # of categories in dG of NSsites models
+
+        getSE = 0  * 0: don't want them, 1: want S.E.s of estimates
+ RateAncestor = 1  * (0,1,2): rates (alpha>0) or ancestral states (1 or 2)
+
+   Small_Diff = .5e-6
+    cleandata = 1  * remove sites with ambiguity data (1:yes, 0:no)?
+*  fix_blength = -1  * 0: ignore, -1: random, 1: initial, 2: fixed
+        method = 0   * 0: simultaneous; 1: one branch at a time
+
+
+* Genetic codes: 0:universal, 1:mammalian mt., 2:yeast mt., 3:mold mt.,
+* 4: invertebrate mt., 5: ciliate nuclear, 6: echinoderm mt., 
+* 7: euplotid mt., 8: alternative yeast nu. 9: ascidian mt., 
+* 10: blepharisma nu.
+* These codes correspond to transl_table 1 to 11 of GENEBANK.
+EOM
+
+	cd $Gene/BranchModel/ 
+	codeml 
+	
+
+
+#####Null Model (change "icode = 1" for mitochondrial genes)
+		mkdir $Gene
+		mkdir $Gene/NullModel
+		cp $Gene.phy $Gene/NullModel/$Gene.phy #This is the phylip format, inframe sequence alignment
+		cp $Gene.NoGroupTree $Gene/NullModel/$Gene.NoGroupTree 
+
+		FILE="$Gene/NullModel/codeml.ctl"
+
+		cat <<EOM >$FILE
+		seqfile = $Gene.phy     * sequence data filename
+     treefile = $Gene.NoGroupTree      * tree structure file name
+      outfile = $Gene.NullModel.out           * main result file name
+
+        noisy = 9  * 0,1,2,3,9: how much rubbish on the screen
+      verbose = 1  * 0: concise; 1: detailed, 2: too much
+      runmode = 0  * 0: user tree;  1: semi-automatic;  2: automatic
+                   * 3: StepwiseAddition; (4,5):PerturbationNNI; -2: pairwise
+
+      seqtype = 1  * 1:codons; 2:AAs; 3:codons-->AAs
+    CodonFreq = 3  * 0:1/61 each, 1:F1X4, 2:F3X4, 3:codon table
+*        ndata = 10
+        clock = 0  * 0:no clock, 1:clock; 2:local clock; 3:CombinedAnalysis
+       aaDist = 0  * 0:equal, +:geometric; -:linear, 1-6:G1974,Miyata,c,p,v,a
+   aaRatefile = dat/jones.dat  * only used for aa seqs with model=empirical(_F)
+                   * dayhoff.dat, jones.dat, wag.dat, mtmam.dat, or your own
+
+        model = 0
+                   * models for codons:
+                       * 0:one, 1:b, 2:2 or more dN/dS ratios for branches
+                   * models for AAs or codon-translated AAs:
+                       * 0:poisson, 1:proportional, 2:Empirical, 3:Empirical+F
+                       * 6:FromCodon, 7:AAClasses, 8:REVaa_0, 9:REVaa(nr=189)
+
+      NSsites = 0
+                   * 0:one w;1:neutral;2:selection; 3:discrete;4:freqs;
+                   * 5:gamma;6:2gamma;7:beta;8:beta&w;9:beta&gamma;
+                   * 10:beta&gamma+1; 11:beta&normal>1; 12:0&2normal>1;
+                   * 13:3normal>0
+
+        icode = 0  * 0:universal code; 1:mammalian mt; 2-10:see below
+        Mgene = 0
+                   * codon: 0:rates, 1:separate; 2:diff pi, 3:diff kapa, 4:all diff
+                   * AA: 0:rates, 1:separate
+
+    fix_kappa = 0  * 1: kappa fixed, 0: kappa to be estimated
+        kappa = 2  * initial or fixed kappa
+    fix_omega = 0  * 1: omega or omega_1 fixed, 0: estimate 
+        omega = 1 * initial or fixed omega, for codons or codon-based AAs
+
+    fix_alpha = 1  * 0: estimate gamma shape parameter; 1: fix it at alpha
+        alpha = 0. * initial or fixed alpha, 0:infinity (constant rate)
+       Malpha = 0  * different alphas for genes
+        ncatG = 10  * # of categories in dG of NSsites models
+
+        getSE = 0  * 0: don't want them, 1: want S.E.s of estimates
+ RateAncestor = 1  * (0,1,2): rates (alpha>0) or ancestral states (1 or 2)
+
+   Small_Diff = .5e-6
+    cleandata = 1  * remove sites with ambiguity data (1:yes, 0:no)?
+*  fix_blength = -1  * 0: ignore, -1: random, 1: initial, 2: fixed
+        method = 0   * 0: simultaneous; 1: one branch at a time
+
+
+* Genetic codes: 0:universal, 1:mammalian mt., 2:yeast mt., 3:mold mt.,
+* 4: invertebrate mt., 5: ciliate nuclear, 6: echinoderm mt., 
+* 7: euplotid mt., 8: alternative yeast nu. 9: ascidian mt., 
+* 10: blepharisma nu.
+* These codes correspond to transl_table 1 to 11 of GENEBANK.
+EOM
+
+	cd $Gene/NullModel/ 
+	codeml 
+
+
+
+
+################################################################################################################################################################################################
+																			#Gene Expression Analyses#
+################################################################################################################################################################################################
+
+################################################
+		#Quantifying Gene Expression#
+################################################
+####Run cufflinks for each sample
+	cufflinks-2.2.1.Linux_x86_64/cufflinks -o $output -G PmexicanaGenome.gff $alignedbam
+
+####Pull out the FPKM for each sample generated from cufflinks
+	cufflinks/$SampleName
+
+	cut -f10 genes.fpkm_tracking > $SampleName.fpkm
+
+	awk -v v="$SampleName" 'NR==1{print v}1' $SampleName.fpkm > $output
+
+
+
+################################################
+	#Phylogenetic analysis of gene expression#
+################################################
+####Run EVE with sulfidic groups designated as foreground lineages (lineages have been given a number code in the tree file "codedTree.tre" but a bug in EVE requires the designation of foreground lineages to one integer less than their coded number [designated by -o])
+EVEmodel -O -o 0 -o 2 -o 3 -o 7 -o 8 -o 10 -o 13 -o 14 -o 15 -o 18 -n 5000 -t codedTree.tre -i Nindivs.nindiv -d FPKM.txt -f _Top5000_out -v 10000
+
+
