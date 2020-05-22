@@ -1,5 +1,5 @@
 # Data and code for Greenway et al. (2020)
-This repository includes data and code associated with Greenway et al.: "Convergent evolution of conserved mitochondrial pathways underlies repeated adaptation to extreme environments". 
+This repository includes data and code associated with Greenway et al.: "Convergent evolution of conserved mitochondrial pathways underlies repeated adaptation to extreme environments". A pre-print of this paper can be found on [bioRxiv](https://www.biorxiv.org/content/10.1101/2020.02.24.959916v2).
 
 ## Biochemical and physiologial analyses
 Four datasets were associated with biochemical and physiological analyses:
