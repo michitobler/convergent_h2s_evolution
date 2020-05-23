@@ -14,5 +14,5 @@ All data were analyzed and visualized in R. Executable code is available as an [
 - [Scripts for local ancestry analysis and the calculation of FST](https://github.com/michitobler/convergent_h2s_evolution/blob/master/fst_saguaro.md)
 
 ## Comparative transcriptomic analyses of Poeciliidae
-- Comparative transcriptomics included analysis of gene expression variation and analysis of molecular evolution. Scripts for the entire analytical pipeline--from mappint to analysis in EVE and PAML--can be found [here](https://github.com/michitobler/convergent_h2s_evolution/blob/master/transcriptomics/mapping_to_EVE.txt)
+- Comparative transcriptomics included analysis of gene expression variation and analysis of molecular evolution. Scripts for the entire analytical pipeline--from mapping to analysis in EVE and PAML--can be found [here](https://github.com/michitobler/convergent_h2s_evolution/blob/master/transcriptomics/mapping_to_EVE.txt)
 - Two auxiliary python scripts associated with comparative transcriptomic analysis can be found in the ["transcriptomics" folder](https://github.com/michitobler/convergent_h2s_evolution/tree/master/transcriptomics).
